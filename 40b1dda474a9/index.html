@@ -148,7 +148,7 @@
 <body>
 <header>
   <h1>Мониторинг вакансий</h1>
-  <div class="meta">Обновлено 2026-07-11 20:36</div>
+  <div class="meta">Обновлено 2026-07-11 20:37</div>
   <div class="tabs" id="tabs"></div>
 </header>
 <div class="content-wrap">
@@ -228,16 +228,33 @@ function matchDetails(v) {
   );
 }
 
+function matchCategory(v) {
+  if (v.match_percent === null || v.match_percent === undefined) return null;
+  const p = v.match_percent;
+  if (p >= 70) return 'green';
+  if (p >= 40) return 'mid';
+  return 'low';
+}
+
 function computeStats(vacancies) {
   const stats = { total: vacancies.length, green: 0, mid: 0, low: 0 };
   vacancies.forEach(v => {
-    if (v.match_percent === null || v.match_percent === undefined) return;
-    const p = v.match_percent;
-    if (p >= 70) stats.green++;
-    else if (p >= 40) stats.mid++;
-    else stats.low++;
+    const cat = matchCategory(v);
+    if (cat) stats[cat]++;
   });
   return stats;
+}
+
+function toggleFilter(key) {
+  if (key === 'total') {
+    activeMatchFilters.clear();
+  } else if (activeMatchFilters.has(key)) {
+    activeMatchFilters.delete(key);
+  } else {
+    activeMatchFilters.add(key);
+  }
+  renderSidebar(currentOrg);
+  renderVacancyList(currentOrg);
 }
 
 function renderSidebar(org) {
@@ -247,14 +264,19 @@ function renderSidebar(org) {
     return;
   }
   const s = computeStats(org.vacancies);
+  const isActive = key => activeMatchFilters.has(key) ? ' active' : '';
+  const totalActive = activeMatchFilters.size === 0 ? ' active' : '';
   sidebar.innerHTML = `
     <div class="stat-panel">
-      <div class="stat-row"><span class="stat-label">Всего</span><span class="stat-value">${s.total}</span></div>
-      <div class="stat-row"><span class="stat-label"><span class="stat-dot green"></span></span><span class="stat-value">${s.green}</span></div>
-      <div class="stat-row"><span class="stat-label"><span class="stat-dot mid"></span></span><span class="stat-value">${s.mid}</span></div>
-      <div class="stat-row"><span class="stat-label"><span class="stat-dot low"></span></span><span class="stat-value">${s.low}</span></div>
+      <div class="stat-row clickable${totalActive}" data-filter="total"><span class="stat-label">Всего</span><span class="stat-value">${s.total}</span></div>
+      <div class="stat-row clickable${isActive('green')}" data-filter="green"><span class="stat-label"><span class="stat-dot green"></span></span><span class="stat-value">${s.green}</span></div>
+      <div class="stat-row clickable${isActive('mid')}" data-filter="mid"><span class="stat-label"><span class="stat-dot mid"></span></span><span class="stat-value">${s.mid}</span></div>
+      <div class="stat-row clickable${isActive('low')}" data-filter="low"><span class="stat-label"><span class="stat-dot low"></span></span><span class="stat-value">${s.low}</span></div>
     </div>
   `;
+  sidebar.querySelectorAll('.stat-row[data-filter]').forEach(row => {
+    row.onclick = () => toggleFilter(row.dataset.filter);
+  });
 }
 
 function renderTabs(activeSlug) {
@@ -287,19 +309,30 @@ function syncSidebarTop() {
 }
 window.addEventListener('resize', syncSidebarTop);
 
-function showOrg(slug) {
-  renderTabs(slug);
-  const org = ORGS.find(o => o.slug === slug);
-  renderSidebar(org);
+let currentOrg = null;
+
+function renderVacancyList(org) {
   const main = document.getElementById('main');
   main.innerHTML = '';
   if (!org || org.vacancies.length === 0) {
     main.innerHTML = '<div class="empty">Вакансий пока нет</div>';
     return;
   }
-  org.vacancies.forEach((v, i) => {
+  const visible = activeMatchFilters.size === 0
+    ? org.vacancies
+    : org.vacancies.filter(v => activeMatchFilters.has(matchCategory(v)));
+  if (visible.length === 0) {
+    main.innerHTML = '<div class="empty">Нет вакансий с выбранным фильтром</div>';
+    return;
+  }
+  // Небольшой отступ перед первой карточкой каждого нового дня — визуально
+  // отделяет дни друг от друга в общем списке (первую карточку списка не
+  // отбиваем, отступ нужен только МЕЖДУ днями).
+  let prevDate = null;
+  visible.forEach((v, i) => {
     const card = document.createElement('div');
-    card.className = 'card';
+    card.className = 'card' + (v.date !== prevDate && i > 0 ? ' day-gap' : '');
+    prevDate = v.date;
     const header = document.createElement('div');
     header.className = 'card-header';
     header.innerHTML = `<span class="card-title-row">${matchBadge(v)}<span class="card-title">${escapeHtml(v.title)}</span></span><span class="card-date">${v.date}</span>`;
@@ -311,6 +344,14 @@ function showOrg(slug) {
     card.appendChild(body);
     main.appendChild(card);
   });
+}
+
+function showOrg(slug) {
+  renderTabs(slug);
+  currentOrg = ORGS.find(o => o.slug === slug);
+  activeMatchFilters = new Set();
+  renderSidebar(currentOrg);
+  renderVacancyList(currentOrg);
 }
 
 if (ORGS.length > 0) {
